@@ -1,12 +1,12 @@
-require 'ddtrace/profiling/pprof/message_set'
-require 'ddtrace/profiling/pprof/pprof_pb'
-require 'ddtrace/profiling/pprof/string_table'
+require 'forwardable'
 
 module Datadog
   module Profiling
     module Pprof
       # Helper functions for modules that convert events to pprof
       module Converter
+        extend Forwardable
+
         attr_reader :builder
 
         def_delegators \
@@ -24,40 +24,46 @@ module Datadog
           event_groups = {}
 
           events.each do |event|
-            key = event_group_key(event) || rand
+            key = yield(event)
             values = build_sample_values(event)
 
             unless key.nil?
               if event_groups.key?(key)
                 # Update values for group
-                group_values = event_groups[key][1]
+                group_values = event_groups[key].values
                 group_values.each_with_index do |group_value, i|
                   group_values[i] = group_value + values[i]
                 end
               else
                 # Add new group
-                event_groups[key] = [event, values]
+                event_groups[key] = EventGroup.new(event, values)
               end
             end
           end
 
-          event_groups.collect do |_group_key, group|
-            yield(
-              # Event
-              group[0],
-              # Values
-              group[1]
-            )
-          end
+          event_groups
         end
 
-        def event_group_key(event)
-          raise NotImplementedError
+        # Creates and add sample types, returning the index of each type.
+        def add_sample_types!(types)
+          types.map do |type_name, type_args|
+            index = nil
+
+            sample_type = sample_types.fetch(*type_args) do |id, type, unit|
+              index = id
+              builder.build_value_type(type, unit)
+            end
+
+            # Map the type to the index to which its assigned.
+            [type_name, index || sample_types.messages.index(sample_type)]
+          end.to_h
         end
 
         def build_sample_values(event)
           raise NotImplementedError
         end
+
+        EventGroup = Struct.new(:sample, :values)
       end
     end
   end

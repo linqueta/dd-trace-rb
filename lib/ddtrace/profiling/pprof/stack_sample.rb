@@ -1,5 +1,6 @@
 require 'forwardable'
 
+require 'ddtrace/ext/profiling'
 require 'ddtrace/profiling/events/stack'
 require 'ddtrace/profiling/pprof/converter'
 
@@ -11,41 +12,37 @@ module Datadog
         include Pprof::Converter
         extend Forwardable
 
-        LABEL_KEY_THREAD_ID = 'thread id'.freeze
-        VALUE_TYPE_WALL = 'wall'.freeze
-        VALUE_UNIT_NANOSECONDS = 'nanoseconds'.freeze
-
-        attr_reader :stack_samples
-
-        def initialize(builder, stack_samples)
+        def initialize(builder)
           @builder = builder
-          @stack_samples = stack_samples
+          @sample_type_indexes = {}
         end
 
-        def add_events!
-          add_sample_types!
-          add_samples!
+        def add_events!(stack_samples)
+          add_samples!(stack_samples)
         end
 
         def add_sample_types!
-          # Add the value type
-          sample_types.fetch(VALUE_TYPE_WALL, VALUE_UNIT_NANOSECONDS) do |id, type, unit|
-            @wall_time_ns_index = id
-            builder.build_value_type(type, unit)
-          end
+          @sample_type_indexes = super(
+            wall_time_ns: [
+              Ext::Profiling::Pprof::VALUE_TYPE_WALL,
+              Ext::Profiling::Pprof::VALUE_UNIT_NANOSECONDS
+            ]
+          )
         end
 
-        def add_samples!
-          builder.samples.concat(build_samples)
+        def add_samples!(stack_samples)
+          samples = build_samples(stack_samples)
+          samples.concat(samples)
         end
 
         def build_samples(stack_samples)
-          group_events(stack_samples) do |stack_sample, values|
-            build_sample(stack_sample, values)
+          groups = group_events(stack_samples, &method(:stack_sample_group_key))
+          groups.collect do |_group_key, group|
+            build_sample(group.sample, group.values)
           end
         end
 
-        def event_group_key(stack_sample)
+        def stack_sample_group_key(stack_sample)
           [
             stack_sample.thread_id,
             [
@@ -69,28 +66,32 @@ module Datadog
         end
 
         def build_sample_values(stack_sample)
-          raise UnknownSampleValueIndex(:wall_time_ns) unless instance_variable_defined?(:@wall_time_ns_index)
+          # If we can't get an index for a sample type, it probably hasn't been defined.
+          # We won't be able to put its value at the correct index.
+          raise UnknownSampleTypeIndex(:wall_time_ns) unless @sample_type_indexes[:wall_time_ns]
 
           # Build a value array that matches the length of the sample types
           # Populate all values with "no value" by default
-          values = Array.new(builder.sample_types.length, Builder::SAMPLE_VALUE_NO_VALUE)
+          values = Array.new(sample_types.length, Builder::SAMPLE_VALUE_NO_VALUE)
 
           # Add values at appropriate index.
           # There may be other sample types present; be sure to put this value
           # matching the correct index of the actual sample type we want to match.
-          values[@wall_time_ns_index] = stack_sample.wall_time_interval_ns
+          values[@sample_type_indexes[:wall_time_ns]] = stack_sample.wall_time_interval_ns
+          values
         end
 
         def build_sample_labels(stack_sample)
           [
             Perftools::Profiles::Label.new(
-              key: string_table.fetch(LABEL_KEY_THREAD_ID),
+              key: string_table.fetch(Ext::Profiling::Pprof::LABEL_KEY_THREAD_ID),
               str: string_table.fetch(stack_sample.thread_id.to_s)
             )
           ]
         end
 
-        class UnknownSampleValueIndex < StandardError
+        # Error when the index of a sample type is unknown
+        class UnknownSampleTypeIndex < StandardError
           attr_reader :value
 
           def initialize(value)
@@ -98,7 +99,7 @@ module Datadog
           end
 
           def message
-            "Sample value index for '#{value}' unknown."
+            "Sample value index for '#{value}' is unknown."
           end
         end
       end

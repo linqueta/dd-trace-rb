@@ -22,6 +22,10 @@ module Datadog
           @items[key] ||= yield(@sequence.next, *args)
         end
 
+        def length
+          @items.length
+        end
+
         def messages
           @items.values
         end

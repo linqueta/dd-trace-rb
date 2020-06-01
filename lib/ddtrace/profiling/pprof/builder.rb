@@ -1,6 +1,9 @@
+require 'ddtrace/profiling/flush'
 require 'ddtrace/profiling/pprof/message_set'
-require 'ddtrace/profiling/pprof/pprof_pb'
 require 'ddtrace/profiling/pprof/string_table'
+
+require 'ddtrace/profiling/pprof/pprof_pb'
+require 'ddtrace/profiling/pprof/stack_sample'
 
 module Datadog
   module Profiling
@@ -11,7 +14,12 @@ module Datadog
         DESC_FRAME_OMITTED = 'frame omitted'.freeze
         DESC_FRAMES_OMITTED = 'frames omitted'.freeze
 
+        CONVERTERS = {
+          Events::StackSample => Pprof::StackSample
+        }.freeze
+
         attr_reader \
+          :converters,
           :functions,
           :locations,
           :mappings,
@@ -27,6 +35,21 @@ module Datadog
           @locations = MessageSet.new
           @functions = MessageSet.new
           @string_table = StringTable.new
+
+          @converters = CONVERTERS.map do |event_class, converter_class|
+            [event_class, converter_class.new(self)]
+          end.to_h
+
+          # Add all sample types now, because they will be required
+          # before adding events to the builder.
+          # (Samples need to know the full list of sample types.)
+          @converters.values.each(&:add_sample_types!)
+        end
+
+        def add_flush!(flush)
+          converter = converters[flush.event_class]
+          raise NoTypeConversionError, flush.event_class unless converter
+          converter.add_events!(flush.events)
         end
 
         def to_profile
@@ -37,7 +60,7 @@ module Datadog
           @mappings = build_mappings
 
           Perftools::Profiles::Profile.new(
-            sample_type: @sample_types,
+            sample_type: @sample_types.messages,
             sample: @samples,
             mapping: @mappings,
             location: @locations.messages,
@@ -119,6 +142,19 @@ module Datadog
               filename: @string_table.fetch($PROGRAM_NAME)
             )
           ]
+        end
+
+        # Error when an unknown event type is given to be converted
+        class NoTypeConversionError < ArgumentError
+          attr_reader :type
+
+          def initialize(type)
+            @type = type
+          end
+
+          def message
+            "Unknown profiling event type cannot be converted to pprof: #{type}"
+          end
         end
       end
     end
