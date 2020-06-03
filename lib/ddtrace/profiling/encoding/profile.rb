@@ -1,5 +1,6 @@
-require 'ddtrace/profiling/events/stack'
-require 'ddtrace/profiling/pprof/stack_sample'
+require 'ddtrace/profiling/flush'
+require 'ddtrace/profiling/pprof/builder'
+require 'ddtrace/profiling/pprof/pprof_pb'
 
 module Datadog
   module Profiling
