@@ -4,8 +4,8 @@ require 'ddtrace/profiling/events/stack'
 require 'ddtrace/profiling/pprof/builder'
 
 RSpec.describe Datadog::Profiling::Pprof::Builder do
-  subject(:builder) { described_class.new(events) }
-  let(:events) { double('events') }
+  subject(:builder) { described_class.new(converters) }
+  let(:converters) { described_class::CONVERTERS }
 
   let(:id_sequence) { Datadog::Utils::Sequence.new(1) }
 
@@ -41,8 +41,49 @@ RSpec.describe Datadog::Profiling::Pprof::Builder do
   end
 
   describe '#build_sample_types' do
-    subject(:build_sample_types) { builder.build_sample_types }
-    it { expect { build_sample_types }.to raise_error(NotImplementedError) }
+    subject(:build_sample_types) { converter.build_sample_types(types) }
+
+    context 'given types' do
+      let(:types) do
+        {
+          wall_time: %w[wall nanoseconds],
+          cpu_time: %w[cpu nanoseconds]
+        }
+      end
+
+      it 'returns sample type indexes' do
+        is_expected.to be_kind_of(Hash)
+        is_expected.to have(2).items
+        is_expected.to eq(wall_time: 0, cpu_time: 1)
+      end
+
+      it 'updates sample type indexes' do
+        expect { build_sample_types }
+          .to change { converter.sample_type_indexes }
+          .from({})
+          .to(wall_time: 0, cpu_time: 1)
+      end
+
+      # it 'updates sample types' do
+      #   expect { build_sample_types }
+      #     .to change { converter.sample_types.messages }
+      #     .from([])
+      #     .to(array_including(kind_of(Perftools::Profiles::ValueType)))
+      # end
+
+      # describe 'adds sample types' do
+      #   subject(:sample_types) { converter.sample_types.messages }
+      #   before { build_sample_types }
+
+      #   it { is_expected.to be_kind_of(Perftools::Profiles::ValueType) }
+      #   it do
+      #     expect(sample_types.first).to have_attributes(
+      #       type: string_id_for(Datadog::Ext::Profiling::Pprof::VALUE_TYPE_WALL),
+      #       unit: string_id_for(Datadog::Ext::Profiling::Pprof::VALUE_UNIT_NANOSECONDS)
+      #     )
+      #   end
+      # end
+    end
   end
 
   describe '#build_value_type' do

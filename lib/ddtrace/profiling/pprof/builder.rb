@@ -10,7 +10,6 @@ module Datadog
     module Pprof
       # Generic profile building behavior
       class Builder
-        SAMPLE_VALUE_NO_VALUE = 0
         DESC_FRAME_OMITTED = 'frame omitted'.freeze
         DESC_FRAMES_OMITTED = 'frames omitted'.freeze
 
@@ -27,23 +26,30 @@ module Datadog
           :samples,
           :string_table
 
-        def initialize
+        def initialize(converters)
           @profile = nil
           @sample_types = MessageSet.new
+          @sample_type_indexes = {}
           @samples = []
           @mappings = []
           @locations = MessageSet.new
           @functions = MessageSet.new
           @string_table = StringTable.new
 
-          @converters = CONVERTERS.map do |event_class, converter_class|
+          # Build converters
+          @converters = converters.map do |event_class, converter_class|
             [event_class, converter_class.new(self)]
           end.to_h
 
           # Add all sample types now, because they will be required
           # before adding events to the builder.
-          # (Samples need to know the full list of sample types.)
-          @converters.values.each(&:add_sample_types!)
+          # (Converters need to know the full list of sample types.)
+          converter_sample_types = @converters.values.inject({}) do |types, converter|
+            types.merge!(converter.sample_value_types)
+          end
+
+          build_sample_types(converter_sample_types)
+          sample_types.freeze
         end
 
         def add_flush!(flush)
@@ -67,6 +73,26 @@ module Datadog
             function: @functions.messages,
             string_table: @string_table.strings
           )
+        end
+
+        def build_sample_types(types)
+          types.each do |type_name, type_args|
+            index = nil
+
+            sample_type = sample_types.fetch(*type_args) do |id, type, unit|
+              index = id
+              build_value_type(type, unit)
+            end
+
+            # Map the type to the index to which its assigned.
+            @sample_type_indexes[type_name] = index || sample_types.messages.index(sample_type)
+          end
+        end
+
+        def sample_type_index(type)
+          index = @sample_type_indexes[type]
+          raise UnknownSampleTypeIndex, type unless index
+          index
         end
 
         def build_value_type(type, unit)
@@ -154,6 +180,19 @@ module Datadog
 
           def message
             "Unknown profiling event type cannot be converted to pprof: #{type}"
+          end
+        end
+
+        # Error when the index of a sample type is unknown
+        class UnknownSampleTypeIndex < StandardError
+          attr_reader :value
+
+          def initialize(value)
+            @value = value
+          end
+
+          def message
+            "Sample value index for '#{value}' is unknown."
           end
         end
       end

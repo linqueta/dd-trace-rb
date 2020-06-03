@@ -1,3 +1,5 @@
+require 'set'
+
 require 'ddtrace/profiling/flush'
 require 'ddtrace/profiling/pprof/builder'
 require 'ddtrace/profiling/pprof/pprof_pb'
@@ -14,7 +16,7 @@ module Datadog
             return if flushes.empty?
 
             # Build a profile from the flushes
-            builder = Pprof::Builder.new
+            builder = Pprof::Builder.new(Pprof::Builder::CONVERTERS)
             flushes.each { |flush| builder.add_flush!(flush) }
             profile = builder.to_profile
 

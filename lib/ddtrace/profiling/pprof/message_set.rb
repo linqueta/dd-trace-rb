@@ -29,6 +29,11 @@ module Datadog
         def messages
           @items.values
         end
+
+        def freeze
+          super
+          @items.freeze
+        end
       end
     end
   end

@@ -7,6 +7,7 @@ module Datadog
 
       module Pprof
         LABEL_KEY_THREAD_ID = 'thread id'.freeze
+        SAMPLE_VALUE_NO_VALUE = 0
         VALUE_TYPE_WALL = 'wall'.freeze
         VALUE_UNIT_NANOSECONDS = 'nanoseconds'.freeze
       end

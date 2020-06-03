@@ -1,5 +1,3 @@
-require 'forwardable'
-
 require 'ddtrace/ext/profiling'
 require 'ddtrace/profiling/events/stack'
 require 'ddtrace/profiling/pprof/converter'
@@ -8,31 +6,23 @@ module Datadog
   module Profiling
     module Pprof
       # Builds a profile from a StackSample
-      class StackSample
-        include Pprof::Converter
-        extend Forwardable
-
-        def initialize(builder)
-          @builder = builder
-          @sample_type_indexes = {}
-        end
-
+      class StackSample < Converter
         def add_events!(stack_samples)
           add_samples!(stack_samples)
         end
 
-        def add_sample_types!
-          @sample_type_indexes = super(
+        def sample_value_types
+          {
             wall_time_ns: [
               Ext::Profiling::Pprof::VALUE_TYPE_WALL,
               Ext::Profiling::Pprof::VALUE_UNIT_NANOSECONDS
             ]
-          )
+          }
         end
 
         def add_samples!(stack_samples)
-          samples = build_samples(stack_samples)
-          samples.concat(samples)
+          new_samples = build_samples(stack_samples)
+          samples.concat(new_samples)
         end
 
         def build_samples(stack_samples)
@@ -66,18 +56,12 @@ module Datadog
         end
 
         def build_sample_values(stack_sample)
-          # If we can't get an index for a sample type, it probably hasn't been defined.
-          # We won't be able to put its value at the correct index.
-          raise UnknownSampleTypeIndex(:wall_time_ns) unless @sample_type_indexes[:wall_time_ns]
-
-          # Build a value array that matches the length of the sample types
-          # Populate all values with "no value" by default
-          values = Array.new(sample_types.length, Builder::SAMPLE_VALUE_NO_VALUE)
+          values = super(stack_sample)
 
           # Add values at appropriate index.
           # There may be other sample types present; be sure to put this value
           # matching the correct index of the actual sample type we want to match.
-          values[@sample_type_indexes[:wall_time_ns]] = stack_sample.wall_time_interval_ns
+          values[builder.sample_type_index(:wall_time_ns)] = stack_sample.wall_time_interval_ns
           values
         end
 
@@ -88,19 +72,6 @@ module Datadog
               str: string_table.fetch(stack_sample.thread_id.to_s)
             )
           ]
-        end
-
-        # Error when the index of a sample type is unknown
-        class UnknownSampleTypeIndex < StandardError
-          attr_reader :value
-
-          def initialize(value)
-            @value = value
-          end
-
-          def message
-            "Sample value index for '#{value}' is unknown."
-          end
         end
       end
     end

@@ -1,13 +1,15 @@
 require 'forwardable'
+require 'ddtrace/ext/profiling'
 
 module Datadog
   module Profiling
     module Pprof
       # Helper functions for modules that convert events to pprof
-      module Converter
+      class Converter
         extend Forwardable
 
-        attr_reader :builder
+        attr_reader \
+          :builder
 
         def_delegators \
           :builder,
@@ -17,6 +19,10 @@ module Datadog
           :sample_types,
           :samples,
           :string_table
+
+        def initialize(builder)
+          @builder = builder
+        end
 
         def group_events(events)
           # Event grouping in format:
@@ -44,23 +50,18 @@ module Datadog
           event_groups
         end
 
-        # Creates and add sample types, returning the index of each type.
-        def add_sample_types!(types)
-          types.map do |type_name, type_args|
-            index = nil
-
-            sample_type = sample_types.fetch(*type_args) do |id, type, unit|
-              index = id
-              builder.build_value_type(type, unit)
-            end
-
-            # Map the type to the index to which its assigned.
-            [type_name, index || sample_types.messages.index(sample_type)]
-          end.to_h
+        def sample_value_types
+          raise NotImplementedError
         end
 
-        def build_sample_values(event)
+        def add_events!(events)
           raise NotImplementedError
+        end
+
+        def build_sample_values(stack_sample)
+          # Build a value array that matches the length of the sample types
+          # Populate all values with "no value" by default
+          Array.new(sample_types.length, Ext::Profiling::Pprof::SAMPLE_VALUE_NO_VALUE)
         end
 
         EventGroup = Struct.new(:sample, :values)
