@@ -1,32 +1,27 @@
-require 'forwardable'
 require 'ddtrace/ext/profiling'
 
 module Datadog
   module Profiling
     module Pprof
-      # Helper functions for modules that convert events to pprof
+      # Base class for converters that convert profiling events to pprof
       class Converter
-        extend Forwardable
-
         attr_reader \
           :builder
 
-        def_delegators \
-          :builder,
-          :functions,
-          :locations,
-          :mappings,
-          :sample_types,
-          :samples,
-          :string_table
+        # Override in child class to define sample types
+        # this converter uses when building samples.
+        def self.sample_value_types
+          raise NotImplementedError
+        end
 
-        def initialize(builder)
+        def initialize(builder, sample_type_mappings)
           @builder = builder
+          @sample_type_mappings = sample_type_mappings
         end
 
         def group_events(events)
           # Event grouping in format:
-          # [key, (event, [values, ...])]
+          # [key, EventGroup]
           event_groups = {}
 
           events.each do |event|
@@ -50,21 +45,39 @@ module Datadog
           event_groups
         end
 
-        def sample_value_types
+        def add_events!(events)
           raise NotImplementedError
         end
 
-        def add_events!(events)
-          raise NotImplementedError
+        def sample_value_index(type)
+          index = @sample_type_mappings[type]
+          raise UnknownSampleTypeMappingError, type unless index
+          index
         end
 
         def build_sample_values(stack_sample)
           # Build a value array that matches the length of the sample types
           # Populate all values with "no value" by default
-          Array.new(sample_types.length, Ext::Profiling::Pprof::SAMPLE_VALUE_NO_VALUE)
+          Array.new(@sample_type_mappings.length, Ext::Profiling::Pprof::SAMPLE_VALUE_NO_VALUE)
         end
 
+        # Represents a grouped event
+        # 'sample' is an example event object from the group.
+        # 'values' is the the summation of the group's sample values
         EventGroup = Struct.new(:sample, :values)
+
+        # Error when the mapping of a sample type to value index is unknown
+        class UnknownSampleTypeMappingError < StandardError
+          attr_reader :type
+
+          def initialize(type)
+            @type = type
+          end
+
+          def message
+            "Mapping for sample value type '#{type}' to index is unknown."
+          end
+        end
       end
     end
   end

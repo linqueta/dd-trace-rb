@@ -8,91 +8,47 @@ require 'ddtrace/profiling/pprof/stack_sample'
 module Datadog
   module Profiling
     module Pprof
-      # Generic profile building behavior
+      # Accumulates profile data and produces a Perftools::Profiles::Profile
       class Builder
         DESC_FRAME_OMITTED = 'frame omitted'.freeze
         DESC_FRAMES_OMITTED = 'frames omitted'.freeze
 
-        CONVERTERS = {
-          Events::StackSample => Pprof::StackSample
-        }.freeze
-
         attr_reader \
-          :converters,
           :functions,
           :locations,
           :mappings,
           :sample_types,
           :samples,
-          :string_table
+          :string_table,
+          :template
 
-        def initialize(converters)
+        def initialize
+          @functions = MessageSet.new
+          @locations = MessageSet.new
+          @mappings = MessageSet.new
           @profile = nil
           @sample_types = MessageSet.new
-          @sample_type_indexes = {}
           @samples = []
-          @mappings = []
-          @locations = MessageSet.new
-          @functions = MessageSet.new
           @string_table = StringTable.new
 
-          # Build converters
-          @converters = converters.map do |event_class, converter_class|
-            [event_class, converter_class.new(self)]
-          end.to_h
-
-          # Add all sample types now, because they will be required
-          # before adding events to the builder.
-          # (Converters need to know the full list of sample types.)
-          converter_sample_types = @converters.values.inject({}) do |types, converter|
-            types.merge!(converter.sample_value_types)
+          # Add default mapping
+          mappings.fetch($PROGRAM_NAME) do |id, prog_name|
+            Perftools::Profiles::Mapping.new(
+              id: 1,
+              filename: string_table.fetch(prog_name)
+            )
           end
-
-          build_sample_types(converter_sample_types)
-          sample_types.freeze
-        end
-
-        def add_flush!(flush)
-          converter = converters[flush.event_class]
-          raise NoTypeConversionError, flush.event_class unless converter
-          converter.add_events!(flush.events)
-        end
-
-        def to_profile
-          @profile ||= build_profile
         end
 
         def build_profile
-          @mappings = build_mappings
-
           Perftools::Profiles::Profile.new(
             sample_type: @sample_types.messages,
             sample: @samples,
-            mapping: @mappings,
+            mapping: @mappings.messages,
             location: @locations.messages,
             function: @functions.messages,
             string_table: @string_table.strings
           )
-        end
-
-        def build_sample_types(types)
-          types.each do |type_name, type_args|
-            index = nil
-
-            sample_type = sample_types.fetch(*type_args) do |id, type, unit|
-              index = id
-              build_value_type(type, unit)
-            end
-
-            # Map the type to the index to which its assigned.
-            @sample_type_indexes[type_name] = index || sample_types.messages.index(sample_type)
-          end
-        end
-
-        def sample_type_index(type)
-          index = @sample_type_indexes[type]
-          raise UnknownSampleTypeIndex, type unless index
-          index
         end
 
         def build_value_type(type, unit)
@@ -159,41 +115,6 @@ module Datadog
             name: @string_table.fetch(function_name),
             filename: @string_table.fetch(filename)
           )
-        end
-
-        def build_mappings
-          [
-            Perftools::Profiles::Mapping.new(
-              id: 1,
-              filename: @string_table.fetch($PROGRAM_NAME)
-            )
-          ]
-        end
-
-        # Error when an unknown event type is given to be converted
-        class NoTypeConversionError < ArgumentError
-          attr_reader :type
-
-          def initialize(type)
-            @type = type
-          end
-
-          def message
-            "Unknown profiling event type cannot be converted to pprof: #{type}"
-          end
-        end
-
-        # Error when the index of a sample type is unknown
-        class UnknownSampleTypeIndex < StandardError
-          attr_reader :value
-
-          def initialize(value)
-            @value = value
-          end
-
-          def message
-            "Sample value index for '#{value}' is unknown."
-          end
         end
       end
     end

@@ -7,22 +7,24 @@ module Datadog
     module Pprof
       # Builds a profile from a StackSample
       class StackSample < Converter
+        SAMPLE_TYPES = {
+          wall_time_ns: [
+            Ext::Profiling::Pprof::VALUE_TYPE_WALL,
+            Ext::Profiling::Pprof::VALUE_UNIT_NANOSECONDS
+          ]
+        }.freeze
+
+        def self.sample_value_types
+          SAMPLE_TYPES
+        end
+
         def add_events!(stack_samples)
           add_samples!(stack_samples)
         end
 
-        def sample_value_types
-          {
-            wall_time_ns: [
-              Ext::Profiling::Pprof::VALUE_TYPE_WALL,
-              Ext::Profiling::Pprof::VALUE_UNIT_NANOSECONDS
-            ]
-          }
-        end
-
         def add_samples!(stack_samples)
           new_samples = build_samples(stack_samples)
-          samples.concat(new_samples)
+          builder.samples.concat(new_samples)
         end
 
         def build_samples(stack_samples)
@@ -49,7 +51,7 @@ module Datadog
           )
 
           Perftools::Profiles::Sample.new(
-            location_id: locations.collect(&:id), # TODO: Lazy enumerate?
+            location_id: locations.collect(&:id),
             value: values,
             label: build_sample_labels(stack_sample)
           )
@@ -57,19 +59,15 @@ module Datadog
 
         def build_sample_values(stack_sample)
           values = super(stack_sample)
-
-          # Add values at appropriate index.
-          # There may be other sample types present; be sure to put this value
-          # matching the correct index of the actual sample type we want to match.
-          values[builder.sample_type_index(:wall_time_ns)] = stack_sample.wall_time_interval_ns
+          values[sample_value_index(:wall_time_ns)] = stack_sample.wall_time_interval_ns
           values
         end
 
         def build_sample_labels(stack_sample)
           [
             Perftools::Profiles::Label.new(
-              key: string_table.fetch(Ext::Profiling::Pprof::LABEL_KEY_THREAD_ID),
-              str: string_table.fetch(stack_sample.thread_id.to_s)
+              key: builder.string_table.fetch(Ext::Profiling::Pprof::LABEL_KEY_THREAD_ID),
+              str: builder.string_table.fetch(stack_sample.thread_id.to_s)
             )
           ]
         end
